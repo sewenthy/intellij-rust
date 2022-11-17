@@ -24,8 +24,10 @@ import org.rust.ide.utils.GenericConstraints
 import org.rust.ide.utils.import.RsImportHelper.importTypeReferencesFromTys
 import org.rust.lang.core.psi.*
 import org.rust.lang.core.psi.ext.*
+import org.rust.lang.core.psi.impl.RsFunctionImpl
 import org.rust.lang.core.resolve.RsCachedImplItem
 import org.rust.openapiext.runWriteCommandAction
+import java.io.File
 
 class RsExtractFunctionHandler : RefactoringActionHandler {
     override fun invoke(project: Project, elements: Array<out PsiElement>, dataContext: DataContext?) {
@@ -56,6 +58,45 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
+            repairLifetime(config, psiFactory, extractedFunction)
+        }
+    }
+
+    private fun repairLifetime(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
+        val sig = config.signature(true)
+        val parentFn = config.function
+        val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
+        val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/rustic-cat/src/repair-refactoring/target/debug/repair-refactoring"
+        val fileName = "/tmp/pre_repair_extract.rs"
+        val newFileName = "/tmp/post_repair_extract.rs"
+        val mainTxt = "\nfn main() {}"
+        println("writing to:$fileName...")
+        File(fileName).writeText("$fnTxt$mainTxt")
+        println("written to:$fileName")
+        val cmd = arrayOf(repairBin, "run", sig, fileName, newFileName, "loosest-bounds-first")
+        val proc = Runtime.getRuntime().exec(cmd)
+        while (proc.isAlive) {}
+        val exitValue = proc.exitValue()
+        val stderr = proc.errorStream.bufferedReader().readText()
+        val stdout = proc.inputStream.bufferedReader().readText()
+        println("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
+        println("exit val $exitValue")
+        if (exitValue == 0) {
+            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
+            val newFile = psiFactory.createPsiFile(newFileTxt)
+            println("newFile: ${newFile.text}")
+            val visitor = object : RsVisitor() {
+                override fun visitFunction(fn: RsFunction) {
+                    super.visitFunction(fn)
+                    println("visiting ${fn.text}...")
+                    println("found fn: ${fn.identifier}")
+                    if (fn.identifier == newFn.identifier){
+                        println("found fn: ${fn.identifier}")
+                        newFn.replace(fn)
+                    }
+                }
+            }
+            newFile.acceptChildren(visitor)
         }
     }
 
@@ -65,7 +106,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         psiFactory: RsPsiFactory
     ): RsFunction? {
         val owner = config.function.owner
-
         val function = psiFactory.createFunction(config.functionText)
         val psiParserFacade = PsiParserFacade.getInstance(project)
         return when {

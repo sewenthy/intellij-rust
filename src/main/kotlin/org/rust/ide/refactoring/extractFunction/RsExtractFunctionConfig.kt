@@ -173,7 +173,7 @@ class RsExtractFunctionConfig private constructor(
      * - Original signature is used when the extracted function is inserting to the source code
      * - Real signature is used when the signature is rendering inside [DialogExtractFunctionUi]
      */
-    private fun signature(isOriginal: Boolean): String = buildString {
+    fun signature(isOriginal: Boolean): String = buildString {
         if (visibilityLevelPublic) {
             append("pub ")
         }
