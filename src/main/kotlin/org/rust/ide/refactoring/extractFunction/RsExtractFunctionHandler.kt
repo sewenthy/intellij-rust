@@ -89,9 +89,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
                 override fun visitFunction(fn: RsFunction) {
                     super.visitFunction(fn)
                     println("visiting ${fn.text}...")
-                    println("found fn: ${fn.identifier}")
-                    if (fn.identifier == newFn.identifier){
-                        println("found fn: ${fn.identifier}")
+                    println("found fn: ${fn.identifier.text}")
+                    if (fn.identifier.text == newFn.identifier.text){
+                        println("found fn: ${fn.identifier.text}")
                         newFn.replace(fn)
                     }
                 }
