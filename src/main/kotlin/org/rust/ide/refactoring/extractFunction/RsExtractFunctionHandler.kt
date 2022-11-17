@@ -6,6 +6,8 @@
 package org.rust.ide.refactoring.extractFunction
 
 import com.intellij.openapi.actionSystem.DataContext
+import com.intellij.openapi.command.WriteCommandAction
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
@@ -70,28 +72,25 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val fileName = "/tmp/pre_repair_extract.rs"
         val newFileName = "/tmp/post_repair_extract.rs"
         val mainTxt = "\nfn main() {}"
-        println("writing to:$fileName...")
         File(fileName).writeText("$fnTxt$mainTxt")
-        println("written to:$fileName")
         val cmd = arrayOf(repairBin, "run", sig, fileName, newFileName, "loosest-bounds-first")
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
-        println("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
-        println("exit val $exitValue")
+        LOG.debug("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
+        LOG.debug("exit val $exitValue")
         if (exitValue == 0) {
             val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
             val newFile = psiFactory.createPsiFile(newFileTxt)
-            println("newFile: ${newFile.text}")
+            LOG.debug("newFile: ${newFile.text}")
             val visitor = object : RsVisitor() {
                 override fun visitFunction(fn: RsFunction) {
                     super.visitFunction(fn)
-                    println("visiting ${fn.text}...")
-                    println("found fn: ${fn.identifier.text}")
+                    LOG.debug("found fn: ${fn.identifier.text}")
                     if (fn.identifier.text == newFn.identifier.text){
-                        println("found fn: ${fn.identifier.text}")
+                        LOG.debug("replaced: ${fn.identifier.text}")
                         newFn.replace(fn)
                     }
                 }
@@ -220,5 +219,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
                 psiElement.delete()
             }
         }
+    }
+
+    companion object {
+        val LOG: Logger = logger<RsExtractFunctionHandler>()
     }
 }
