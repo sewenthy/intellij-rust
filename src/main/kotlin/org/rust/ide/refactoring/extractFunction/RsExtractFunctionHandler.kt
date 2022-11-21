@@ -68,7 +68,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val sig = config.signature(true)
         val parentFn = config.function
         val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
-        val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/rustic-cat/src/repair-refactoring/target/debug/repair-refactoring"
+        val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/repair-refactoring-v1"
         val fileName = "/tmp/pre_repair_extract.rs"
         val newFileName = "/tmp/post_repair_extract.rs"
         val mainTxt = "\nfn main() {}"
