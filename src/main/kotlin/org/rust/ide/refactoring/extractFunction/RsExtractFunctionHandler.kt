@@ -8,6 +8,7 @@ package org.rust.ide.refactoring.extractFunction
 import com.intellij.openapi.actionSystem.DataContext
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.PsiElement
@@ -65,7 +66,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
     }
 
     private fun repairLifetime(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
-        val sig = config.signature(true)
+        val name = config.name
         val parentFn = config.function
         val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
         val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/repair-refactoring-v1"
@@ -73,7 +74,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val newFileName = "/tmp/post_repair_extract.rs"
         val mainTxt = "\nfn main() {}"
         File(fileName).writeText("$fnTxt$mainTxt")
-        val cmd = arrayOf(repairBin, "run", sig, fileName, newFileName, "loosest-bounds-first")
+        val cmd = arrayOf(repairBin, "run", name, fileName, newFileName, "loosest-bounds-first")
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
