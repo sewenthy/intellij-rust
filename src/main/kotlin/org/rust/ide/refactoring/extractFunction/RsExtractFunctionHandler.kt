@@ -61,7 +61,45 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
+            LOG.info("going into borrow")
+            borrow(config, psiFactory, extractedFunction)
             repairLifetime(config, psiFactory, extractedFunction)
+        }
+    }
+
+    private fun borrow(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
+        val name = config.name
+        val parentFn = config.function
+        val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
+        val borrowBin = "/home/sewen/YNC_Academics/Senior/Capstone/the-borrower-v1"
+        val fileName = "/tmp/pre_borrow_extract.rs"
+        val newFileName = "/tmp/post_borrow_extract.rs"
+        val mainTxt = "\nfn main() {}"
+        File(fileName).writeText("$fnTxt$mainTxt")
+        LOG.info("parentFn.name: ${parentFn.name}")
+        val cmd = arrayOf(borrowBin, "run", fileName, newFileName, parentFn.name, name)
+        val proc = Runtime.getRuntime().exec(cmd)
+        while (proc.isAlive) {}
+        val exitValue = proc.exitValue()
+        val stderr = proc.errorStream.bufferedReader().readText()
+        val stdout = proc.inputStream.bufferedReader().readText()
+        LOG.info("running borrower: \nstdout:\n$stdout\nstderr:\n$stderr")
+        LOG.info("exit val $exitValue")
+        if (exitValue == 0) {
+            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
+            val newFile = psiFactory.createPsiFile(newFileTxt)
+            LOG.debug("newFile: ${newFile.text}")
+            val visitor = object : RsVisitor() {
+                override fun visitFunction(fn: RsFunction) {
+                    super.visitFunction(fn)
+                    LOG.debug("found fn: ${fn.identifier.text}")
+                    if (fn.identifier.text == newFn.identifier.text){
+                        LOG.debug("replaced: ${fn.identifier.text}")
+                        newFn.replace(fn)
+                    }
+                }
+            }
+            newFile.acceptChildren(visitor)
         }
     }
 

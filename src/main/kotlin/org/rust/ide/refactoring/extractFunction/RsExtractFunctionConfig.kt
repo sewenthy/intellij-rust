@@ -52,24 +52,16 @@ class Parameter private constructor(
     /** Original name of the parameter (parameter renaming does not affect it) */
     private val originalName = name
 
-    private val mutText: String
-        get() = if (isMutable && (!isReference || requiresMut)) "mut " else ""
-    private val referenceText: String
-        get() = if (isReference) {
-            if (isMutable) "&mut " else "&"
-        } else {
-            ""
-        }
     private val typeText: String = type?.renderInsertionSafe().orEmpty()
 
     val originalParameterText: String
-        get() = if (type != null) "$mutText$originalName: $referenceText$typeText" else originalName
+        get() = if (type != null) "$originalName: $typeText" else originalName
 
     val parameterText: String
-        get() = if (type != null) "$mutText$name: $referenceText$typeText" else name
+        get() = if (type != null) "$name: $typeText" else name
 
     val argumentText: String
-        get() = "$referenceText$originalName"
+        get() = "$originalName"
 
     val isSelf: Boolean
         get() = type == null
@@ -113,7 +105,7 @@ class Parameter private constructor(
                 operatorType == null || operatorType == UnaryOperator.REF_MUT
             }
 
-            return direct(binding, requiredBorrowing, requiredMutableValue)
+            return direct(binding, false, false)
         }
     }
 }
