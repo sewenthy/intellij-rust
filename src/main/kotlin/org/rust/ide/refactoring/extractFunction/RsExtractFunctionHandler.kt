@@ -30,6 +30,7 @@ import org.rust.lang.core.psi.ext.*
 import org.rust.lang.core.psi.impl.RsFunctionImpl
 import org.rust.lang.core.resolve.RsCachedImplItem
 import org.rust.openapiext.runWriteCommandAction
+import org.apache.commons.io.IOUtils
 import java.io.File
 
 class RsExtractFunctionHandler : RefactoringActionHandler {
@@ -61,23 +62,33 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
-            nonLocalController(config, psiFactory, extractedFunction)
-            borrow(config, psiFactory, extractedFunction)
-            repairLifetime(config, psiFactory, extractedFunction)
+            nonLocalController(config, file)
+            LOG.info("controller completed")
+            borrow(config, file)
+            LOG.info("borrow completed")
+            repairLifetime(config, file)
+            LOG.info("repairer completed")
         }
     }
 
-    private fun nonLocalController(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
+    private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) {
         val name = config.name
         val parentFn = config.function
-        val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
         val controlBin = "/home/sewen/YNC_Academics/Senior/Capstone/controller-v1"
-        val fileName = "/tmp/pre_control_extract.rs"
-        val newFileName = "/tmp/post_control_extract.rs"
-        val mainTxt = "\nfn main() {}\n"
-        File(fileName).writeText("$fnTxt$mainTxt")
-        LOG.info("parentFn.name: ${parentFn.name}")
-        val cmd = arrayOf(controlBin, "run", fileName, newFileName, parentFn.name, name)
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val fileName = file.name
+        val filePath = "$fileParent/$fileName"
+        LOG.info("file path: $filePath")
+
+        val bak = "/tmp/${fileName}-ij-extract.bk"
+        val cmd1 = arrayOf("cp", filePath, bak)
+        val proc1 = Runtime.getRuntime().exec(cmd1)
+        while (proc1.isAlive) {}
+
+        //write the extracted fn
+        File(filePath).writeText(file.text)
+
+        val cmd = arrayOf(controlBin, "run", filePath, filePath, parentFn.name, name)
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
@@ -85,35 +96,29 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val stdout = proc.inputStream.bufferedReader().readText()
         LOG.info("running controller: \nstdout:\n$stdout\nstderr:\n$stderr")
         LOG.info("exit val $exitValue")
-        if (exitValue == 0) {
-            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
-            val newFile = psiFactory.createPsiFile(newFileTxt)
-            LOG.debug("newFile: ${newFile.text}")
-            val visitor = object : RsVisitor() {
-                override fun visitFunction(fn: RsFunction) {
-                    super.visitFunction(fn)
-                    LOG.debug("found fn: ${fn.identifier.text}")
-                    if (fn.identifier.text == newFn.identifier.text){
-                        LOG.debug("replaced: ${fn.identifier.text}")
-                        newFn.replace(fn)
-                    }
-                }
-            }
-            newFile.acceptChildren(visitor)
+        if (exitValue != 0) {
+            LOG.info("bad exit val restoring file")
+            val cmd3 = arrayOf("cp", bak, filePath)
+            val proc3 = Runtime.getRuntime().exec(cmd3)
+            while (proc3.isAlive) {}
         }
     }
 
-    private fun borrow(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
+    private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) {
         val name = config.name
         val parentFn = config.function
-        val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
         val borrowBin = "/home/sewen/YNC_Academics/Senior/Capstone/borrower-v1"
-        val fileName = "/tmp/pre_borrow_extract.rs"
-        val newFileName = "/tmp/post_borrow_extract.rs"
-        val mainTxt = "\nfn main() {}\n"
-        File(fileName).writeText("$fnTxt$mainTxt")
-        LOG.info("parentFn.name: ${parentFn.name}")
-        val cmd = arrayOf(borrowBin, "run", fileName, newFileName, parentFn.name, name)
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val fileName = file.name
+        val filePath = "$fileParent/$fileName"
+        LOG.info("file path: $filePath")
+
+        val bak = "/tmp/${fileName}-ij-extract.bk"
+        val cmd1 = arrayOf("cp", filePath, bak)
+        val proc1 = Runtime.getRuntime().exec(cmd1)
+        while (proc1.isAlive) {}
+
+        val cmd = arrayOf(borrowBin, "run", filePath, filePath, parentFn.name, name)
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
@@ -121,56 +126,48 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val stdout = proc.inputStream.bufferedReader().readText()
         LOG.info("running borrower: \nstdout:\n$stdout\nstderr:\n$stderr")
         LOG.info("exit val $exitValue")
-        if (exitValue == 0) {
-            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
-            val newFile = psiFactory.createPsiFile(newFileTxt)
-            LOG.debug("newFile: ${newFile.text}")
-            val visitor = object : RsVisitor() {
-                override fun visitFunction(fn: RsFunction) {
-                    super.visitFunction(fn)
-                    LOG.debug("found fn: ${fn.identifier.text}")
-                    if (fn.identifier.text == newFn.identifier.text){
-                        LOG.debug("replaced: ${fn.identifier.text}")
-                        newFn.replace(fn)
-                    }
-                }
-            }
-            newFile.acceptChildren(visitor)
+        if (exitValue != 0) {
+            LOG.info("bad exit val restoring file")
+            val cmd3 = arrayOf("cp", bak, filePath)
+            val proc3 = Runtime.getRuntime().exec(cmd3)
+            while (proc3.isAlive) {}
         }
     }
 
-    private fun repairLifetime(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory, newFn: RsFunction) {
+    private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile) {
         val name = config.name
-        val parentFn = config.function
-        val fnTxt = "#[allow(dead_code)]\n${parentFn?.text}"
         val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/repairer-v1"
-        val fileName = "/tmp/pre_repair_extract.rs"
-        val newFileName = "/tmp/post_repair_extract.rs"
-        val mainTxt = "\nfn main() {}\n"
-        File(fileName).writeText("$fnTxt$mainTxt")
-        val cmd = arrayOf(repairBin, "run", name, fileName, newFileName, "loosest-bounds-first")
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val fileName = file.name
+        val filePath = "$fileParent/$fileName"
+        LOG.info("file path: $filePath")
+
+        val bak = "/tmp/${fileName}-ij-extract.bk"
+        val cmd1 = arrayOf("cp", filePath, bak)
+        val proc1 = Runtime.getRuntime().exec(cmd1)
+        while (proc1.isAlive) {}
+
+        // find manifest
+        var here = file.getContainingDirectory()
+        while (here.findFile("Cargo.toml") == null) {
+            here = here.getParentDirectory()
+        }
+        val herePath = here.getVirtualFile().getPath()
+        val manifestPath = "$herePath/Cargo.toml"
+        LOG.info("manifest: $manifestPath")
+        val cmd = arrayOf(repairBin, "cargo", filePath, manifestPath, name, "loosest-bounds-first")
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
-        LOG.debug("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
-        LOG.debug("exit val $exitValue")
-        if (exitValue == 0) {
-            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
-            val newFile = psiFactory.createPsiFile(newFileTxt)
-            LOG.debug("newFile: ${newFile.text}")
-            val visitor = object : RsVisitor() {
-                override fun visitFunction(fn: RsFunction) {
-                    super.visitFunction(fn)
-                    LOG.debug("found fn: ${fn.identifier.text}")
-                    if (fn.identifier.text == newFn.identifier.text){
-                        LOG.debug("replaced: ${fn.identifier.text}")
-                        newFn.replace(fn)
-                    }
-                }
-            }
-            newFile.acceptChildren(visitor)
+        LOG.info("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
+        LOG.info("exit val $exitValue")
+        if (exitValue != 0) {
+            LOG.info("bad exit val restoring file")
+            val cmd3 = arrayOf("cp", bak, filePath)
+            val proc3 = Runtime.getRuntime().exec(cmd3)
+            while (proc3.isAlive) {}
         }
     }
 
