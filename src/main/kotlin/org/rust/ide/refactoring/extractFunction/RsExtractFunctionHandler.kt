@@ -170,7 +170,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val proc1 = Runtime.getRuntime().exec(cmd1)
         while (proc1.isAlive) {}
 
-        val cmd = arrayOf(borrowBin, "run", filePath, filePath, parentFn.name, name)
+        val dumpFileName = "/tmp/method_call_mutability.txt"
+
+        val cmd = arrayOf(borrowBin, "run", filePath, filePath, dumpFileName, parentFn.name, name)
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
