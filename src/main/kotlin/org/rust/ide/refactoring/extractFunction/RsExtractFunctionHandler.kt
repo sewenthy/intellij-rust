@@ -11,11 +11,14 @@ import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VfsUtil
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiFile
 import com.intellij.psi.PsiParserFacade
 import com.intellij.psi.search.LocalSearchScope
 import com.intellij.psi.search.searches.ReferencesSearch
+import com.intellij.psi.util.PsiTreeUtil;
+import com.intellij.psi.util.elementType
 import com.intellij.refactoring.RefactoringActionHandler
 import com.intellij.refactoring.RefactoringBundle
 import com.intellij.usageView.UsageInfo
@@ -27,8 +30,12 @@ import org.rust.ide.utils.GenericConstraints
 import org.rust.ide.utils.import.RsImportHelper.importTypeReferencesFromTys
 import org.rust.lang.core.psi.*
 import org.rust.lang.core.psi.ext.*
+import org.rust.lang.core.psi.impl.RsMethodCallImpl
 import org.rust.lang.core.psi.impl.RsFunctionImpl
+import org.rust.lang.core.psi.impl.*
 import org.rust.lang.core.resolve.RsCachedImplItem
+import org.rust.lang.core.types.*
+import org.rust.lang.core.types.ty.*
 import org.rust.openapiext.runWriteCommandAction
 import org.apache.commons.io.IOUtils
 import java.io.File
@@ -62,6 +69,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
+            if (!dumpMethodCallTypes(extractedFunction)) {
+                return@runWriteCommandAction
+            }
             nonLocalController(config, file)
             LOG.info("controller completed")
             borrow(config, file)
@@ -69,6 +79,47 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             repairLifetime(config, file)
             LOG.info("repairer completed")
         }
+    }
+
+    private fun dumpMethodCallTypes(extractFn: RsFunction) : Boolean {
+        val dumpFileName = "/tmp/method_call_mutability.txt"
+        val dumpFile = File(dumpFileName)
+        dumpFile.writeText("")
+        val visitor = object : RsVisitor() {
+            override fun visitElement(o: RsElement) {
+                o.acceptChildren(this)
+            }
+
+            override fun visitBlock(o: RsBlock) {
+                LOG.debug("elem: ${o.text}")
+                LOG.debug("elem type: $o")
+                for (stmt in o.getStmtList()) {
+                    stmt.acceptChildren(this)
+                }
+            }
+
+            override fun visitDotExpr(o: RsDotExpr) {
+                LOG.debug("dot expr: ${o.text}")
+                val methodCall = o.getMethodCall()!!
+                val inferred = methodCall.inference!!.getResolvedMethodType(o.getMethodCall()!!)!!
+
+                val selfTy = inferred.paramTypes[0]
+                if (selfTy is TyReference) {
+                    if (selfTy.mutability.isMut) {
+                        dumpFile.appendText("${o.text}\n")
+                    }
+                }
+
+                super.visitDotExpr(o)
+            }
+        }
+        try {
+            extractFn.acceptChildren(visitor)
+        } catch (e: Exception) {
+            LOG.error("dump method call failed: $e")
+            return false
+        }
+        return true
     }
 
     private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) {
@@ -102,6 +153,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
         }
+        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
     }
 
     private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) {
@@ -132,6 +184,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
         }
+        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
     }
 
     private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile) {
@@ -169,6 +222,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
         }
+        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
     }
 
     private fun addExtractedFunction(
