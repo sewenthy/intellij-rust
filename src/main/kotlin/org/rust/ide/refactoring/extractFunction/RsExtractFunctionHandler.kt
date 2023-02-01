@@ -72,11 +72,17 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (!dumpMethodCallTypes(extractedFunction)) {
                 return@runWriteCommandAction
             }
-            nonLocalController(config, file)
+            if (!nonLocalController(config, file)){
+                return@runWriteCommandAction
+            }
             LOG.info("controller completed")
-            borrow(config, file)
+            if (!borrow(config, file)) {
+                return@runWriteCommandAction
+            }
             LOG.info("borrow completed")
-            repairLifetime(config, file)
+            if (!repairLifetime(config, file, project)){
+                return@runWriteCommandAction
+            }
             LOG.info("repairer completed")
         }
     }
@@ -122,7 +128,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         return true
     }
 
-    private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) {
+    private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
         val controlBin = "/home/sewen/YNC_Academics/Senior/Capstone/controller-v1"
@@ -152,11 +158,13 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val cmd3 = arrayOf("cp", bak, filePath)
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
+            return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+        return true
     }
 
-    private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) {
+    private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
         val borrowBin = "/home/sewen/YNC_Academics/Senior/Capstone/borrower-v1"
@@ -166,9 +174,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("file path: $filePath")
 
         val bak = "/tmp/${fileName}-ij-extract.bk"
-        val cmd1 = arrayOf("cp", filePath, bak)
-        val proc1 = Runtime.getRuntime().exec(cmd1)
-        while (proc1.isAlive) {}
 
         val dumpFileName = "/tmp/method_call_mutability.txt"
 
@@ -185,11 +190,13 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val cmd3 = arrayOf("cp", bak, filePath)
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
+            return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+        return true
     }
 
-    private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile) {
+    private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile, project: Project) : Boolean {
         val name = config.name
         val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/repairer-v1"
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
@@ -198,16 +205,8 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("file path: $filePath")
 
         val bak = "/tmp/${fileName}-ij-extract.bk"
-        val cmd1 = arrayOf("cp", filePath, bak)
-        val proc1 = Runtime.getRuntime().exec(cmd1)
-        while (proc1.isAlive) {}
 
-        // find manifest
-        var here = file.getContainingDirectory()
-        while (here.findFile("Cargo.toml") == null) {
-            here = here.getParentDirectory()
-        }
-        val herePath = here.getVirtualFile().getPath()
+        val herePath = project.getBaseDir().getPath()
         val manifestPath = "$herePath/Cargo.toml"
         LOG.info("manifest: $manifestPath")
         val cmd = arrayOf(repairBin, "cargo", filePath, manifestPath, name, "loosest-bounds-first")
@@ -223,8 +222,10 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val cmd3 = arrayOf("cp", bak, filePath)
             val proc3 = Runtime.getRuntime().exec(cmd3)
             while (proc3.isAlive) {}
+            return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+        return true
     }
 
     private fun addExtractedFunction(
