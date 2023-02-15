@@ -69,21 +69,19 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
-            if (!dumpMethodCallTypes(extractedFunction)) {
-                return@runWriteCommandAction
+            if (dumpMethodCallTypes(extractedFunction)) {
+                LOG.info("dumped call types completed successfully")
+                if (nonLocalController(config, file)){
+                    LOG.info("controller completed successfully")
+                    if (borrow(config, file)) {
+                        LOG.info("borrow completed successfully")
+                        if (repairLifetime(config, file, project)){
+                            LOG.info("repairer completed successfully")
+                        }
+                    }
+                }
             }
-            if (!nonLocalController(config, file)){
-                return@runWriteCommandAction
-            }
-            LOG.info("controller completed")
-            if (!borrow(config, file)) {
-                return@runWriteCommandAction
-            }
-            LOG.info("borrow completed")
-            if (!repairLifetime(config, file, project)){
-                return@runWriteCommandAction
-            }
-            LOG.info("repairer completed")
+
         }
     }
 
@@ -177,7 +175,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         val dumpFileName = "/tmp/method_call_mutability.txt"
 
-        val cmd = arrayOf(borrowBin, "run", filePath, filePath, dumpFileName, parentFn.name, name)
+        val cmd = arrayOf("cargo", "run", "--manifest-path", "/home/sewen/YNC_Academics/Senior/Capstone/rustic-cat/src/borrower/Cargo.toml", "--", "run", filePath, filePath, dumpFileName, parentFn.name, name, bak)
         val proc = Runtime.getRuntime().exec(cmd)
         while (proc.isAlive) {}
         val exitValue = proc.exitValue()
