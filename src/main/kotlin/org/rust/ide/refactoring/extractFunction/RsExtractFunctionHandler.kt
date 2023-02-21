@@ -72,7 +72,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (dumpMethodCallTypes(extractedFunction)) {
                 LOG.info("dumped call types completed successfully")
                 if (nonLocalController(config, file)){
-                    LOG.info("controller completed successfully")
+                    LOG.info("controller completed succnessfully")
                     if (borrow(config, file)) {
                         LOG.info("borrow completed successfully")
                         if (repairLifetime(config, file, project)){
@@ -83,6 +83,12 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             }
 
         }
+    }
+
+    private fun failRepair(backupFile: String, filePath: String) {
+        val cmd = arrayOf("cp", filePath, "/tmp/debug-repair", "&&", "cp", backupFile, filePath)
+        val proc = Runtime.getRuntime().exec(cmd)
+        proc.waitFor()
     }
 
     private fun dumpMethodCallTypes(extractFn: RsFunction) : Boolean {
@@ -129,7 +135,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
     private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
-        val controlBin = "/home/sewen/YNC_Academics/Senior/Capstone/controller-v1"
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
         val fileName = file.name
         val filePath = "$fileParent/$fileName"
@@ -138,14 +143,14 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val bak = "/tmp/${fileName}-ij-extract.bk"
         val cmd1 = arrayOf("cp", filePath, bak)
         val proc1 = Runtime.getRuntime().exec(cmd1)
-        while (proc1.isAlive) {}
+        proc1.waitFor()
 
         //write the extracted fn
         File(filePath).writeText(file.text)
 
-        val cmd = arrayOf(controlBin, "run", filePath, filePath, parentFn.name, name)
+        val cmd = arrayOf("controller", "run", filePath, filePath, parentFn.name, name)
         val proc = Runtime.getRuntime().exec(cmd)
-        while (proc.isAlive) {}
+        proc.waitFor()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -153,9 +158,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
-            val cmd3 = arrayOf("cp", bak, filePath)
-            val proc3 = Runtime.getRuntime().exec(cmd3)
-            while (proc3.isAlive) {}
+            failRepair(bak, filePath)
             return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
@@ -165,7 +168,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
     private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
-        val borrowBin = "/home/sewen/YNC_Academics/Senior/Capstone/borrower-v1"
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
         val fileName = file.name
         val filePath = "$fileParent/$fileName"
@@ -175,9 +177,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         val dumpFileName = "/tmp/method_call_mutability.txt"
 
-        val cmd = arrayOf("cargo", "run", "--manifest-path", "/home/sewen/YNC_Academics/Senior/Capstone/rustic-cat/src/borrower/Cargo.toml", "--", "run", filePath, filePath, dumpFileName, parentFn.name, name, bak)
+        val cmd = arrayOf("borrower", "run", filePath, filePath, dumpFileName, parentFn.name, name, bak)
         val proc = Runtime.getRuntime().exec(cmd)
-        while (proc.isAlive) {}
+        proc.waitFor()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -185,9 +187,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
-            val cmd3 = arrayOf("cp", bak, filePath)
-            val proc3 = Runtime.getRuntime().exec(cmd3)
-            while (proc3.isAlive) {}
+            failRepair(bak, filePath)
             return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
@@ -196,7 +196,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
     private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile, project: Project) : Boolean {
         val name = config.name
-        val repairBin = "/home/sewen/YNC_Academics/Senior/Capstone/repairer-v1"
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
         val fileName = file.name
         val filePath = "$fileParent/$fileName"
@@ -207,9 +206,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val herePath = project.getBaseDir().getPath()
         val manifestPath = "$herePath/Cargo.toml"
         LOG.info("manifest: $manifestPath")
-        val cmd = arrayOf(repairBin, "cargo", filePath, manifestPath, name, "loosest-bounds-first")
+        val cmd = arrayOf("repairer", "cargo", filePath, manifestPath, name, "loosest-bounds-first")
         val proc = Runtime.getRuntime().exec(cmd)
-        while (proc.isAlive) {}
+        proc.waitFor()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -217,9 +216,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
-            val cmd3 = arrayOf("cp", bak, filePath)
-            val proc3 = Runtime.getRuntime().exec(cmd3)
-            while (proc3.isAlive) {}
+            failRepair(bak, filePath)
             return false
         }
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
