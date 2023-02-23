@@ -72,29 +72,34 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (dumpMethodCallTypes(extractedFunction)) {
                 LOG.info("dumped call types completed successfully")
                 if (nonLocalController(config, file)){
-                    LOG.info("controller completed succnessfully")
+                    LOG.info("controller completed successfully")
                     if (borrow(config, file)) {
                         LOG.info("borrow completed successfully")
-                        if (repairLifetime(config, file, project)){
+                        if (repairLifetime(config, file, project, psiFactory)){
                             LOG.info("repairer completed successfully")
                         }
                     }
                 }
             }
-
         }
     }
 
     private fun failRepair(backupFile: String, filePath: String) {
-        val cmd = arrayOf("cp", filePath, "/tmp/debug-repair", "&&", "cp", backupFile, filePath)
+        val newFileTxt = File(filePath).readText(Charsets.UTF_8)
+        LOG.info("at failure: $newFileTxt")
+        val cmd = arrayOf("cp", filePath, "/tmp/debug-repair")
         val proc = Runtime.getRuntime().exec(cmd)
         proc.waitFor()
+        val cmd2 = arrayOf("cp", backupFile, filePath)
+        val proc2 = Runtime.getRuntime().exec(cmd2)
+        proc2.waitFor()
     }
 
     private fun dumpMethodCallTypes(extractFn: RsFunction) : Boolean {
         val dumpFileName = "/tmp/method_call_mutability.txt"
         val dumpFile = File(dumpFileName)
         dumpFile.writeText("")
+        val begin = System.currentTimeMillis()
         val visitor = object : RsVisitor() {
             override fun visitElement(o: RsElement) {
                 o.acceptChildren(this)
@@ -125,7 +130,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         }
         try {
             extractFn.acceptChildren(visitor)
+            val end = System.currentTimeMillis()
+            LOG.info("Elapsed time in milliseconds success: ${end-begin}")
         } catch (e: Exception) {
+            val end = System.currentTimeMillis()
+            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
             LOG.error("dump method call failed: $e")
             return false
         }
@@ -147,10 +156,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         //write the extracted fn
         File(filePath).writeText(file.text)
-
+        val begin = System.currentTimeMillis()
         val cmd = arrayOf("controller", "run", filePath, filePath, parentFn.name, name)
         val proc = Runtime.getRuntime().exec(cmd)
         proc.waitFor()
+        val end = System.currentTimeMillis()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -158,9 +168,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
+            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
             failRepair(bak, filePath)
             return false
         }
+        LOG.info("Elapsed time in milliseconds success: ${end-begin}")
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
         return true
     }
@@ -178,8 +190,10 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val dumpFileName = "/tmp/method_call_mutability.txt"
 
         val cmd = arrayOf("borrower", "run", filePath, filePath, dumpFileName, parentFn.name, name, bak)
+        val begin = System.currentTimeMillis()
         val proc = Runtime.getRuntime().exec(cmd)
         proc.waitFor()
+        val end = System.currentTimeMillis()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -187,14 +201,88 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
+            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
             failRepair(bak, filePath)
             return false
         }
+        LOG.info("Elapsed time in milliseconds success: ${end-begin}")
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
         return true
     }
 
-    private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile, project: Project) : Boolean {
+    private fun repairLifetimeUsingRustc(config: RsExtractFunctionConfig, file: PsiFile, psiFactory: RsPsiFactory) : Boolean {
+
+        val name = config.name
+        val parentFnName = config.function.identifier.text
+        LOG.info("parent fn name: $parentFnName, name: $name")
+        var parentFn : RsFunction? = null
+
+
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val filePath = "$fileParent/${file.name}"
+
+        val fileAfterBorrowTxt = File(filePath).readText(Charsets.UTF_8)
+        val fileAfterBorrow = psiFactory.createPsiFile(fileAfterBorrowTxt)
+        var newFn : RsFunction? = null
+        val initVisitor = object : RsVisitor() {
+            override fun visitFunction(fn: RsFunction) {
+                super.visitFunction(fn)
+                LOG.info("found fn: ${fn.identifier.text}")
+                if (fn.identifier.text == name){
+                    newFn = fn
+                }
+
+                if (fn.identifier.text == parentFnName){
+                    parentFn = fn
+                }
+            }
+        }
+        fileAfterBorrow.acceptChildren(initVisitor)
+
+        val fnTxt = "#[allow(dead_code)]\n${parentFn!!.text}\n${newFn!!.text}"
+        val fileName = "/tmp/pre_repair_extract.rs"
+        val newFileName = "/tmp/post_repair_extract.rs"
+        val mainTxt = "\nfn main() {}"
+        File(fileName).writeText("$fnTxt$mainTxt")
+        val begin = System.currentTimeMillis()
+        val cmd = arrayOf("repairer", "run", name, fileName, newFileName, "loosest-bounds-first")
+        val proc = Runtime.getRuntime().exec(cmd)
+        proc.waitFor()
+        val end = System.currentTimeMillis()
+        val exitValue = proc.exitValue()
+        val stderr = proc.errorStream.bufferedReader().readText()
+        val stdout = proc.inputStream.bufferedReader().readText()
+        LOG.info("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
+        LOG.info("exit val $exitValue")
+        if (exitValue == 0) {
+            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
+            val newFile = psiFactory.createPsiFile(newFileTxt)
+            val visitor = object : RsVisitor() {
+                override fun visitFunction(fn: RsFunction) {
+                    super.visitFunction(fn)
+                    LOG.info("found fn: ${fn.identifier.text}")
+                    if (fn.identifier.text == name){
+                        LOG.info("set new fn: ${fn.identifier.text}")
+                        newFn!!.replace(fn)
+                    }
+
+                    if (fn.identifier.text == parentFnName){
+                        LOG.info("set new parent fn: ${fn.identifier.text}")
+                        parentFn!!.replace(fn)
+                    }
+                }
+            }
+            newFile.acceptChildren(visitor)
+
+            LOG.info("Elapsed time in milliseconds rustc success: ${end-begin}")
+            File(filePath).writeText("${fileAfterBorrow.text}")
+        } else {
+            LOG.info("Elapsed time in milliseconds rustc failure: ${end-begin}")
+        }
+        return exitValue == 0
+    }
+
+    private fun repairLifetimeUsingCargo(config: RsExtractFunctionConfig, file: PsiFile, project: Project) : Boolean {
         val name = config.name
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
         val fileName = file.name
@@ -206,9 +294,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val herePath = project.getBaseDir().getPath()
         val manifestPath = "$herePath/Cargo.toml"
         LOG.info("manifest: $manifestPath")
+        val begin = System.currentTimeMillis()
         val cmd = arrayOf("repairer", "cargo", filePath, manifestPath, name, "loosest-bounds-first")
         val proc = Runtime.getRuntime().exec(cmd)
         proc.waitFor()
+        val end = System.currentTimeMillis()
         val exitValue = proc.exitValue()
         val stderr = proc.errorStream.bufferedReader().readText()
         val stdout = proc.inputStream.bufferedReader().readText()
@@ -216,11 +306,34 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         LOG.info("exit val $exitValue")
         if (exitValue != 0) {
             LOG.info("bad exit val restoring file")
-            failRepair(bak, filePath)
+            LOG.info("Elapsed time in milliseconds cargo failure: ${end-begin}")
+            noLifetimeFixMode(project) {
+                failRepair(bak, filePath)
+            }
             return false
         }
+        LOG.info("Elapsed time in milliseconds cargo success: ${end-begin}")
         VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
         return true
+    }
+
+    private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile, project: Project, psiFactory: RsPsiFactory) : Boolean {
+        val name = config.name
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val fileName = file.name
+        val filePath = "$fileParent/$fileName"
+        LOG.info("file path: $filePath")
+
+        if (repairLifetimeUsingRustc(config, file, psiFactory)) {
+            LOG.info("lifetime repair using rustc succeeded")
+            cargoMode(project) {
+                repairLifetimeUsingCargo(config, file, project)
+            }
+        }
+        cargoMode(project) {
+            repairLifetimeUsingCargo(config, file, project)
+        }
+        return false
     }
 
     private fun addExtractedFunction(
