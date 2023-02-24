@@ -39,6 +39,7 @@ import org.rust.lang.core.types.ty.*
 import org.rust.openapiext.runWriteCommandAction
 import org.apache.commons.io.IOUtils
 import java.io.File
+import java.util.concurrent.TimeUnit
 
 class RsExtractFunctionHandler : RefactoringActionHandler {
     override fun invoke(project: Project, elements: Array<out PsiElement>, dataContext: DataContext?) {
@@ -84,15 +85,53 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         }
     }
 
+    private fun execAndGetVal(cmd: Array<String>) : Int {
+        val proc = Runtime.getRuntime().exec(cmd)
+        val stderr_r = proc.errorStream.bufferedReader()
+        val stdout_r = proc.inputStream.bufferedReader()
+        var stderr = ""
+        var stdout = ""
+        val stderr_reader = Thread {
+            try {
+                var tmp : String? = stderr_r.readLine()
+                while (tmp != null) {
+                    LOG.info("STDERR>$tmp")
+                    stderr = stderr + "\n" + tmp
+                    tmp = stderr_r.readLine()
+                }
+            } catch (e : Exception) {
+            }
+        }
+
+        val stdout_reader = Thread {
+            try {
+                var tmp : String? = stdout_r.readLine()
+                while (tmp != null) {
+                    LOG.info("STDOUT>$tmp")
+                    stdout = stdout + "\n" + tmp
+                    tmp = stdout_r.readLine()
+                }
+            } catch (e : Exception) {
+            }
+        }
+        stderr_reader.start()
+        stdout_reader.start()
+        proc.waitFor(5, TimeUnit.MINUTES)
+        LOG.info("running controller: \nstdout:\n$stdout\nstderr:\n$stderr")
+        stderr_reader.join()
+        stdout_reader.join()
+        return proc.exitValue()
+    }
+
     private fun failRepair(backupFile: String, filePath: String) {
         val newFileTxt = File(filePath).readText(Charsets.UTF_8)
         LOG.info("at failure: $newFileTxt")
         val cmd = arrayOf("cp", filePath, "/tmp/debug-repair")
         val proc = Runtime.getRuntime().exec(cmd)
-        proc.waitFor()
+        proc.waitFor(5, TimeUnit.MINUTES)
         val cmd2 = arrayOf("cp", backupFile, filePath)
         val proc2 = Runtime.getRuntime().exec(cmd2)
-        proc2.waitFor()
+        proc2.waitFor(5, TimeUnit.MINUTES)
     }
 
     private fun dumpMethodCallTypes(extractFn: RsFunction) : Boolean {
@@ -106,35 +145,34 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             }
 
             override fun visitBlock(o: RsBlock) {
-                LOG.debug("elem: ${o.text}")
-                LOG.debug("elem type: $o")
+                LOG.info("elem: ${o.text}")
+                LOG.info("elem type: $o")
                 for (stmt in o.getStmtList()) {
                     stmt.acceptChildren(this)
                 }
             }
 
             override fun visitDotExpr(o: RsDotExpr) {
-                LOG.debug("dot expr: ${o.text}")
-                val methodCall = o.getMethodCall()!!
-                val inferred = methodCall.inference!!.getResolvedMethodType(o.getMethodCall()!!)!!
+                LOG.info("dot expr: ${o.text}")
+                super.visitDotExpr(o)
+                val methodCall = o.getMethodCall()
+                val inferred = methodCall?.inference?.getResolvedMethodType(methodCall)
 
-                val selfTy = inferred.paramTypes[0]
-                if (selfTy is TyReference) {
+                val selfTy = inferred?.paramTypes?.get(0)
+                if (selfTy != null && selfTy is TyReference) {
                     if (selfTy.mutability.isMut) {
                         dumpFile.appendText("${o.text}\n")
                     }
                 }
-
-                super.visitDotExpr(o)
             }
         }
         try {
             extractFn.acceptChildren(visitor)
             val end = System.currentTimeMillis()
-            LOG.info("Elapsed time in milliseconds success: ${end-begin}")
+            LOG.info("dump method call elapsed time in milliseconds success: ${end?.minus(begin)}")
         } catch (e: Exception) {
             val end = System.currentTimeMillis()
-            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
+            LOG.info("dump method call elapsed time in milliseconds failure: ${end?.minus(begin)}")
             LOG.error("dump method call failed: $e")
             return false
         }
@@ -152,29 +190,36 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val bak = "/tmp/${fileName}-ij-extract.bk"
         val cmd1 = arrayOf("cp", filePath, bak)
         val proc1 = Runtime.getRuntime().exec(cmd1)
-        proc1.waitFor()
+        proc1.waitFor(5, TimeUnit.MINUTES)
 
         //write the extracted fn
         File(filePath).writeText(file.text)
+
+        var success = false
+        val cmd : Array<String> = arrayOf("controller", "run", filePath, filePath, parentFn!!.name!!, name)
+        var end : Long? = null
         val begin = System.currentTimeMillis()
-        val cmd = arrayOf("controller", "run", filePath, filePath, parentFn.name, name)
-        val proc = Runtime.getRuntime().exec(cmd)
-        proc.waitFor()
-        val end = System.currentTimeMillis()
-        val exitValue = proc.exitValue()
-        val stderr = proc.errorStream.bufferedReader().readText()
-        val stdout = proc.inputStream.bufferedReader().readText()
-        LOG.info("running controller: \nstdout:\n$stdout\nstderr:\n$stderr")
-        LOG.info("exit val $exitValue")
-        if (exitValue != 0) {
-            LOG.info("bad exit val restoring file")
-            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
-            failRepair(bak, filePath)
-            return false
+        try {
+            val exitValue = execAndGetVal(cmd)
+            end = System.currentTimeMillis()
+            LOG.info("exit val $exitValue")
+            if (exitValue == 0) {
+                LOG.info("nclf elapsed time in milliseconds success: ${end?.minus(begin)}")
+                success = true
+            }
+        } catch (e: Exception) {
+            end = System.currentTimeMillis()
+            LOG.info("exception $e")
+            LOG.info("nclf elapsed time in milliseconds failure: ${end?.minus(begin)}")
+        } finally {
+            VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+            if (!success) {
+                LOG.info("bad exit val restoring file")
+                LOG.info("nclf elapsed time in milliseconds failure: ${end?.minus(begin)}")
+                failRepair(bak, filePath)
+            }
+            return success
         }
-        LOG.info("Elapsed time in milliseconds success: ${end-begin}")
-        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
-        return true
     }
 
     private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
@@ -189,25 +234,31 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         val dumpFileName = "/tmp/method_call_mutability.txt"
 
-        val cmd = arrayOf("borrower", "run", filePath, filePath, dumpFileName, parentFn.name, name, bak)
+        val cmd : Array<String> = arrayOf("borrower", "run", filePath, filePath, dumpFileName, parentFn!!.name!!, name!!, bak)
+        var success = false
         val begin = System.currentTimeMillis()
-        val proc = Runtime.getRuntime().exec(cmd)
-        proc.waitFor()
-        val end = System.currentTimeMillis()
-        val exitValue = proc.exitValue()
-        val stderr = proc.errorStream.bufferedReader().readText()
-        val stdout = proc.inputStream.bufferedReader().readText()
-        LOG.info("running borrower: \nstdout:\n$stdout\nstderr:\n$stderr")
-        LOG.info("exit val $exitValue")
-        if (exitValue != 0) {
-            LOG.info("bad exit val restoring file")
-            LOG.info("Elapsed time in milliseconds failure: ${end-begin}")
-            failRepair(bak, filePath)
-            return false
+        var end: Long? = null
+        try {
+            val exitValue = execAndGetVal(cmd)
+            end = System.currentTimeMillis()
+            LOG.info("exit val $exitValue")
+            if (exitValue == 0) {
+                success = true
+                LOG.info("borrow elapsed time in milliseconds success: ${end?.minus(begin)}")
+            }
+        } catch (e: Exception) {
+            end = System.currentTimeMillis()
+            LOG.info("exception $e")
+            LOG.info("borrow elapsed time in milliseconds failure: ${end?.minus(begin)}")
+        } finally {
+            VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+            if (!success) {
+                LOG.info("bad exit val restoring file")
+                LOG.info("borrow elapsed time in milliseconds failure: ${end?.minus(begin)}")
+                failRepair(bak, filePath)
+            }
+            return success
         }
-        LOG.info("Elapsed time in milliseconds success: ${end-begin}")
-        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
-        return true
     }
 
     private fun repairLifetimeUsingRustc(config: RsExtractFunctionConfig, file: PsiFile, psiFactory: RsPsiFactory) : Boolean {
@@ -244,42 +295,46 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val newFileName = "/tmp/post_repair_extract.rs"
         val mainTxt = "\nfn main() {}"
         File(fileName).writeText("$fnTxt$mainTxt")
+        var end : Long? = null
+        var success = false
+        val cmd : Array<String> = arrayOf("repairer", "run", name, fileName, newFileName, "loosest-bounds-first")
         val begin = System.currentTimeMillis()
-        val cmd = arrayOf("repairer", "run", name, fileName, newFileName, "loosest-bounds-first")
-        val proc = Runtime.getRuntime().exec(cmd)
-        proc.waitFor()
-        val end = System.currentTimeMillis()
-        val exitValue = proc.exitValue()
-        val stderr = proc.errorStream.bufferedReader().readText()
-        val stdout = proc.inputStream.bufferedReader().readText()
-        LOG.info("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
-        LOG.info("exit val $exitValue")
-        if (exitValue == 0) {
-            val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
-            val newFile = psiFactory.createPsiFile(newFileTxt)
-            val visitor = object : RsVisitor() {
-                override fun visitFunction(fn: RsFunction) {
-                    super.visitFunction(fn)
-                    LOG.info("found fn: ${fn.identifier.text}")
-                    if (fn.identifier.text == name){
-                        LOG.info("set new fn: ${fn.identifier.text}")
-                        newFn!!.replace(fn)
-                    }
+        try {
+            val exitValue = execAndGetVal(cmd)
+            end = System.currentTimeMillis()
+            LOG.info("exit val $exitValue")
+            if (exitValue == 0) {
+                val newFileTxt = File(newFileName).readText(Charsets.UTF_8)
+                val newFile = psiFactory.createPsiFile(newFileTxt)
+                val visitor = object : RsVisitor() {
+                    override fun visitFunction(fn: RsFunction) {
+                        super.visitFunction(fn)
+                        LOG.info("found fn: ${fn.identifier.text}")
+                        if (fn.identifier.text == name){
+                            LOG.info("set new fn: ${fn.identifier.text}")
+                            newFn!!.replace(fn)
+                        }
 
-                    if (fn.identifier.text == parentFnName){
-                        LOG.info("set new parent fn: ${fn.identifier.text}")
-                        parentFn!!.replace(fn)
+                        if (fn.identifier.text == parentFnName){
+                            LOG.info("set new parent fn: ${fn.identifier.text}")
+                            parentFn!!.replace(fn)
+                        }
                     }
                 }
+                newFile.acceptChildren(visitor)
+                success = true
+                LOG.info("repair elapsed time in milliseconds rustc success: ${end?.minus(begin)}")
+                File(filePath).writeText("${fileAfterBorrow.text}")
+            } else {
+                LOG.info("repair elapsed time in milliseconds rustc failure: ${end?.minus(begin)}")
             }
-            newFile.acceptChildren(visitor)
-
-            LOG.info("Elapsed time in milliseconds rustc success: ${end-begin}")
-            File(filePath).writeText("${fileAfterBorrow.text}")
-        } else {
-            LOG.info("Elapsed time in milliseconds rustc failure: ${end-begin}")
+        } catch (e: Exception) {
+            end = System.currentTimeMillis()
+            LOG.info("exception $e")
+            LOG.info("repair rustc elapsed time in milliseconds failure: ${end?.minus(begin)}")
+        } finally {
+            return success
         }
-        return exitValue == 0
     }
 
     private fun repairLifetimeUsingCargo(config: RsExtractFunctionConfig, file: PsiFile, project: Project) : Boolean {
@@ -294,46 +349,58 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val herePath = project.getBaseDir().getPath()
         val manifestPath = "$herePath/Cargo.toml"
         LOG.info("manifest: $manifestPath")
+        val cmd : Array<String> = arrayOf("repairer", "cargo", filePath, manifestPath, name, "loosest-bounds-first")
+        var success = false
+        var end : Long? = null
         val begin = System.currentTimeMillis()
-        val cmd = arrayOf("repairer", "cargo", filePath, manifestPath, name, "loosest-bounds-first")
-        val proc = Runtime.getRuntime().exec(cmd)
-        proc.waitFor()
-        val end = System.currentTimeMillis()
-        val exitValue = proc.exitValue()
-        val stderr = proc.errorStream.bufferedReader().readText()
-        val stdout = proc.inputStream.bufferedReader().readText()
-        LOG.info("running repair: \nstdout:\n$stdout\nstderr:\n$stderr")
-        LOG.info("exit val $exitValue")
-        if (exitValue != 0) {
-            LOG.info("bad exit val restoring file")
-            LOG.info("Elapsed time in milliseconds cargo failure: ${end-begin}")
-            noLifetimeFixMode(project) {
-                failRepair(bak, filePath)
+        try {
+            val exitValue = execAndGetVal(cmd)
+            end = System.currentTimeMillis()
+
+            LOG.info("exit val $exitValue")
+            if (exitValue == 0) {
+                success = true
+                LOG.info("repair elapsed time in milliseconds cargo success: ${end?.minus(begin)}")
             }
-            return false
+        } catch (e: Exception) {
+            end = System.currentTimeMillis()
+            LOG.info("exception $e")
+            LOG.info("repair cargo elapsed time in milliseconds failure: ${end?.minus(begin)}")
+        } finally {
+            VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
+            if (!success) {
+                LOG.info("bad exit val restoring file")
+                LOG.info("repair elapsed time in milliseconds cargo failure: ${end?.minus(begin)}")
+                var revert = true
+                noLifetimeFixMode(project) {
+                    revert = false
+                }
+                if (revert) {
+                    failRepair(bak, filePath)
+                }
+            }
+            return success
         }
-        LOG.info("Elapsed time in milliseconds cargo success: ${end-begin}")
-        VfsUtil.markDirtyAndRefresh(false, true, true, file.getVirtualFile())
-        return true
     }
 
     private fun repairLifetime(config: RsExtractFunctionConfig, file: PsiFile, project: Project, psiFactory: RsPsiFactory) : Boolean {
-        val name = config.name
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
         val fileName = file.name
         val filePath = "$fileParent/$fileName"
         LOG.info("file path: $filePath")
 
+        var cargoSuccess = false
+
         if (repairLifetimeUsingRustc(config, file, psiFactory)) {
             LOG.info("lifetime repair using rustc succeeded")
+            LOG.info("running cargo anyways for testing timing")
+            repairLifetimeUsingCargo(config, file, project)
+        } else {
             cargoMode(project) {
-                repairLifetimeUsingCargo(config, file, project)
+                cargoSuccess = repairLifetimeUsingCargo(config, file, project)
             }
         }
-        cargoMode(project) {
-            repairLifetimeUsingCargo(config, file, project)
-        }
-        return false
+        return cargoSuccess
     }
 
     private fun addExtractedFunction(

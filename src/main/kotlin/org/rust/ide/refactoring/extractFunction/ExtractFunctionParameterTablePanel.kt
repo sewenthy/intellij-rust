@@ -16,10 +16,12 @@ class ParameterDataHolder(val parameter: Parameter, val onChange: () -> Unit) : 
         parameter.name = name
         onChange()
     }
+    /*
     fun changeMutability(mutable: Boolean) {
         parameter.isMutable = mutable
         onChange()
     }
+    */
 }
 
 class ChooseColumn : ColumnInfo<ParameterDataHolder, Boolean>(null) {
@@ -52,7 +54,7 @@ class TypeColumn : ColumnInfo<ParameterDataHolder, String>("Type") {
     override fun valueOf(item: ParameterDataHolder): String =
         item.parameter.type?.toString() ?: "_"
 }
-
+/*
 class MutabilityColumn : ColumnInfo<ParameterDataHolder, Boolean>("Mutable") {
     override fun valueOf(item: ParameterDataHolder): Boolean =
         item.parameter.isMutable
@@ -65,6 +67,7 @@ class MutabilityColumn : ColumnInfo<ParameterDataHolder, Boolean>("Mutable") {
 
     override fun getColumnClass(): Class<*> = Boolean::class.java
 }
+*/
 
 class ExtractFunctionParameterTablePanel(
     nameValidator: (String) -> Boolean,
@@ -73,8 +76,8 @@ class ExtractFunctionParameterTablePanel(
 ) : AbstractParameterTablePanel<ParameterDataHolder>(
     ChooseColumn(),
     NameColumn(nameValidator),
-    TypeColumn(),
-    MutabilityColumn()
+    TypeColumn()
+    //MutabilityColumn()
 ) {
     init {
         myTable.setDefaultRenderer(Boolean::class.java, BooleanTableCellRenderer())
