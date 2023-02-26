@@ -38,8 +38,9 @@ fun getQualifiedName(element: PsiElement, vararg tys: Ty): Set<RsQualifiedNamedE
     }
 }
 
-fun getCrateName(qnElement: RsQualifiedNamedElement?) : String? {
-    return qnElement?.qualifiedName?.split("::")?.get(0)
+fun getCrateName(element: PsiElement, vararg tys: Ty) : String? {
+    val context = element.ancestorOrSelf<RsMod>()
+    return context?.qualifiedName?.split("::")?.get(0)
 }
 
 fun typeTextOf(function: RsFunction, type: Ty?) : String {
@@ -47,7 +48,7 @@ fun typeTextOf(function: RsFunction, type: Ty?) : String {
         val qns = getQualifiedName(function, type)
         val txt = type.renderInsertionSafe(useAliasNames = false, includeLifetimeArguments = true, useQualifiedName = qns).orEmpty()
         if (qns.size > 0) {
-            val crateName = getCrateName(qns.iterator().next())
+            val crateName = getCrateName(function, type)
             if (crateName != null) {
                 return txt.replace("$crateName::", "")
             }

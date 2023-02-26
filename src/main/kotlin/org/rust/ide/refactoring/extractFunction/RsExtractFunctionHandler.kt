@@ -99,7 +99,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             try {
                 var tmp : String? = stderr_r.readLine()
                 while (tmp != null) {
-                    LOG.debug("STDERR>$tmp")
+                    LOG.info("STDERR>$tmp")
                     tmp = stderr_r.readLine()
                 }
             } catch (e : Exception) {
@@ -110,7 +110,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             try {
                 var tmp : String? = stdout_r.readLine()
                 while (tmp != null) {
-                    LOG.debug("STDOUT>$tmp")
+                    LOG.info("STDOUT>$tmp")
                     tmp = stdout_r.readLine()
                 }
             } catch (e : Exception) {
