@@ -29,6 +29,34 @@ import org.rust.stdext.buildList
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.diagnostic.logger
 
+fun getQualifiedName(element: PsiElement, vararg tys: Ty): Set<RsQualifiedNamedElement> {
+    val context = element.ancestorOrSelf<RsElement>()
+    return if (context != null) {
+        getTypeReferencesInfoFromTys(context, *tys).toQualify
+    } else {
+        emptySet()
+    }
+}
+
+fun getCrateName(qnElement: RsQualifiedNamedElement?) : String? {
+    return qnElement?.qualifiedName?.split("::")?.get(0)
+}
+
+fun typeTextOf(function: RsFunction, type: Ty?) : String {
+    if (type != null) {
+        val qns = getQualifiedName(function, type)
+        val txt = type.renderInsertionSafe(useAliasNames = false, includeLifetimeArguments = true, useQualifiedName = qns).orEmpty()
+        if (qns.size > 0) {
+            val crateName = getCrateName(qns.iterator().next())
+            if (crateName != null) {
+                return txt.replace("$crateName::", "")
+            }
+        }
+        return txt
+    }
+    return ""
+}
+
 class ReturnValue(val exprText: String?, val type: Ty) {
     companion object {
         fun direct(expr: RsExpr): ReturnValue =
@@ -45,7 +73,7 @@ class ReturnValue(val exprText: String?, val type: Ty) {
 }
 
 class Parameter private constructor(
-    file: PsiFile,
+    function: RsFunction,
     var name: String,
     val type: Ty? = null,
     private val isReference: Boolean = false,
@@ -56,7 +84,7 @@ class Parameter private constructor(
     /** Original name of the parameter (parameter renaming does not affect it) */
     private val originalName = name
 
-    val typeText: String = type?.renderInsertionSafe(useAliasNames = false, skipUnchangedDefaultTypeArguments = false, includeLifetimeArguments = true, useQualifiedName = getQualifiedName(file, type)).orEmpty()
+    val typeText : String = typeTextOf(function, type)
 
     val originalParameterText: String
         get() = if (type != null) "$originalName: $typeText" else originalName
@@ -70,22 +98,10 @@ class Parameter private constructor(
     val isSelf: Boolean
         get() = type == null
 
-    fun getQualifiedName(element: PsiElement, vararg tys: Ty): Set<RsQualifiedNamedElement> {
-        val context = element.ancestorOrSelf<RsElement>()
-        return if (context != null) {
-            val qualified = getTypeReferencesInfoFromTys(context, *tys).toQualify
-            LOG.info("qualified name $tys: $qualified")
-            qualified
-        } else {
-            LOG.info("no qualified name $tys")
-            emptySet()
-        }
-    }
-
     companion object {
         val LOG: Logger = logger<Parameter>()
 
-        private fun direct(file: PsiFile, value: RsPatBinding, requiredBorrowing: Boolean, requiredMutableValue: Boolean): Parameter {
+        private fun direct(function: RsFunction, value: RsPatBinding, requiredBorrowing: Boolean, requiredMutableValue: Boolean): Parameter {
             val reference = when {
                 requiredMutableValue -> requiredBorrowing
                 value.mutability.isMut -> true
@@ -97,15 +113,15 @@ class Parameter private constructor(
                 value.mutability.isMut -> true
                 else -> false
             }
-            return Parameter(file, value.referenceName, value.type, reference, mutable, requiredMutableValue)
+            return Parameter(function, value.referenceName, value.type, reference, mutable, requiredMutableValue)
         }
 
-        fun self(file: PsiFile, name: String): Parameter =
-            Parameter(file, name)
+        fun self(function: RsFunction, name: String): Parameter =
+            Parameter(function, name)
 
         // TODO: Get rid of the heuristics and implement proper borrow analysis
         fun build(
-            file: PsiFile,
+            function: RsFunction,
             binding: RsPatBinding,
             references: List<PsiReference>,
             isUsedAfterEnd: Boolean,
@@ -124,7 +140,7 @@ class Parameter private constructor(
                 operatorType == null || operatorType == UnaryOperator.REF_MUT
             }
 
-            return direct(file, binding, false, false)
+            return direct(function, binding, false, false)
         }
     }
 }
@@ -180,18 +196,6 @@ class RsExtractFunctionConfig private constructor(
         return function.typeParameters.filter { it.declaredType in paramAndReturnTypes }
     }
 
-    fun getQualifiedName(element: PsiElement, vararg tys: Ty): Set<RsQualifiedNamedElement> {
-        val context = element.ancestorOrSelf<RsElement>()
-        return if (context != null) {
-            val qualified = getTypeReferencesInfoFromTys(context, *tys).toQualify
-            LOG.info("qualified name $tys: $qualified")
-            qualified
-        } else {
-            LOG.info("no qualified name $tys")
-            emptySet()
-        }
-    }
-
     /**
      * - Original signature is used when the extracted function is inserting to the source code
      * - Real signature is used when the signature is rendering inside [DialogExtractFunctionUi]
@@ -208,7 +212,7 @@ class RsExtractFunctionConfig private constructor(
         }
         append("fn $name$typeParametersText(${if (isOriginal) originalParametersText else parametersText})")
         if (returnValue != null && returnValue.type !is TyUnit) {
-            append(" -> ${returnType.renderInsertionSafe(includeLifetimeArguments = true, useQualifiedName = getQualifiedName(function, returnType))}")
+            append(" -> ${typeTextOf(function, returnType)}")
         }
         append(whereClausesText)
     }
@@ -282,7 +286,7 @@ class RsExtractFunctionConfig private constructor(
                 if (targets.isEmpty()) return@mapNotNull null
                 val isUsedAfterEnd = result.any { it.element.textOffset > end }
 
-                Parameter.build(file, binding, targets, isUsedAfterEnd, implLookup)
+                Parameter.build(fn, binding, targets, isUsedAfterEnd, implLookup)
             }.toMutableList()
 
             val innerBindings = letBindings
@@ -308,7 +312,7 @@ class RsExtractFunctionConfig private constructor(
                     .search(selfParameter, LocalSearchScope(fn))
                     .any { ref -> ref.element.textOffset in start..end }
                 if (used) {
-                    parameters.add(0, Parameter.self(file, selfParameter.text))
+                    parameters.add(0, Parameter.self(fn, selfParameter.text))
                 }
             }
 
