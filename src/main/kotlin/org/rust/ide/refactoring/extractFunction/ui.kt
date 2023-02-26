@@ -51,12 +51,13 @@ interface ExtractFunctionUi {
 
 fun noLifetimeFixMode(
     project: Project,
+    message: String,
     callback: () -> Unit
 )  {
     if (!isUnitTestMode) {
         val panel = panel {
             row(null) {
-                label("Do you want to proceed with possibly incorrect lifetimes?")
+                label(message)
             }
         }
 
@@ -77,6 +78,7 @@ fun noLifetimeFixMode(
     }
 }
 
+
 fun cargoMode (
     project: Project,
     callback: () -> Unit
@@ -84,7 +86,7 @@ fun cargoMode (
     if (!isUnitTestMode) {
         val panel = panel {
             row(null) {
-                label("Lifetime repairs using Rustc has failed. Do you want to proceed with using Cargo to repair lifetimes?  It might take up to five minutes.")
+                label("Lifetime repairs using Rustc has failed. Do you want to proceed with using Cargo to repair lifetimes?  It might take up to a minute.")
             }
         }
         val dialog = dialog(
@@ -98,6 +100,33 @@ fun cargoMode (
             modality = DialogWrapper.IdeModalityType.IDE
         ) {
             callback()
+            emptyList()
+        }
+        dialog.show()
+    }
+}
+
+
+
+fun extractionFailed (
+    project: Project
+) {
+    if (!isUnitTestMode) {
+        val panel = panel {
+            row(null) {
+                label("Extraction has failed. Check log.")
+            }
+        }
+        val dialog = dialog(
+            "Extraction Failed",
+            panel,
+            resizable = true,
+            okActionEnabled = true,
+            project = project,
+            parent = null,
+            errorText = null,
+            modality = DialogWrapper.IdeModalityType.IDE
+        ) {
             emptyList()
         }
         dialog.show()

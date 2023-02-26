@@ -79,8 +79,14 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
                         if (repairLifetime(config, file, project, psiFactory)){
                             LOG.info("repairer completed successfully")
                         }
+                    } else {
+                        extractionFailed(project)
                     }
+                } else {
+                    extractionFailed(project)
                 }
+            } else {
+                extractionFailed(project)
             }
         }
     }
@@ -89,14 +95,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val proc = Runtime.getRuntime().exec(cmd)
         val stderr_r = proc.errorStream.bufferedReader()
         val stdout_r = proc.inputStream.bufferedReader()
-        var stderr = ""
-        var stdout = ""
         val stderr_reader = Thread {
             try {
                 var tmp : String? = stderr_r.readLine()
                 while (tmp != null) {
-                    LOG.info("STDERR>$tmp")
-                    stderr = stderr + "\n" + tmp
+                    LOG.debug("STDERR>$tmp")
                     tmp = stderr_r.readLine()
                 }
             } catch (e : Exception) {
@@ -107,8 +110,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             try {
                 var tmp : String? = stdout_r.readLine()
                 while (tmp != null) {
-                    LOG.info("STDOUT>$tmp")
-                    stdout = stdout + "\n" + tmp
+                    LOG.debug("STDOUT>$tmp")
                     tmp = stdout_r.readLine()
                 }
             } catch (e : Exception) {
@@ -117,7 +119,6 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         stderr_reader.start()
         stdout_reader.start()
         proc.waitFor(5, TimeUnit.MINUTES)
-        LOG.info("running controller: \nstdout:\n$stdout\nstderr:\n$stderr")
         stderr_reader.join()
         stdout_reader.join()
         return proc.exitValue()
@@ -145,15 +146,15 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             }
 
             override fun visitBlock(o: RsBlock) {
-                LOG.info("elem: ${o.text}")
-                LOG.info("elem type: $o")
+                LOG.debug("elem: ${o.text}")
+                LOG.debug("elem type: $o")
                 for (stmt in o.getStmtList()) {
                     stmt.acceptChildren(this)
                 }
             }
 
             override fun visitDotExpr(o: RsDotExpr) {
-                LOG.info("dot expr: ${o.text}")
+                LOG.debug("dot expr: ${o.text}")
                 super.visitDotExpr(o)
                 val methodCall = o.getMethodCall()
                 val inferred = methodCall?.inference?.getResolvedMethodType(methodCall)
@@ -346,7 +347,26 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         val bak = "/tmp/${fileName}-ij-extract.bk"
 
-        val herePath = project.getBaseDir().getPath()
+        val baseDir = project.getBaseDir().getPath()
+
+        // base manifest path too long compile time
+        // val herePath = project.getBaseDir().getPath()
+        // val manifestPath = "$herePath/Cargo.toml"
+        var here = file.getContainingDirectory()
+        while (here.findFile("Cargo.toml") == null && here.getVirtualFile().getPath() != baseDir) {
+            here = here.getParentDirectory()
+        }
+        var revert = true
+        if (here.findFile("Cargo.toml") == null) {
+            noLifetimeFixMode(project, "No Cargo manifest file was found (we looked recursively until $baseDir), so no Cargo repair was done.  Do you want to proceed with possibly incorrect lifetimes?") {
+                revert = false
+            }
+            if (revert) {
+                failRepair(bak, filePath)
+            }
+            return false
+        }
+        val herePath = here.getVirtualFile().getPath()
         val manifestPath = "$herePath/Cargo.toml"
         LOG.info("manifest: $manifestPath")
         val cmd : Array<String> = arrayOf("repairer", "cargo", filePath, manifestPath, name, "loosest-bounds-first")
@@ -371,8 +391,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (!success) {
                 LOG.info("bad exit val restoring file")
                 LOG.info("repair elapsed time in milliseconds cargo failure: ${end?.minus(begin)}")
-                var revert = true
-                noLifetimeFixMode(project) {
+                noLifetimeFixMode(project, "Lifetime repairs using Cargo has failed.  Do you want to proceed with possibly incorrect lifetimes?") {
                     revert = false
                 }
                 if (revert) {

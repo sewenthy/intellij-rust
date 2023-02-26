@@ -52,7 +52,7 @@ class NameColumn(private val nameValidator: (String) -> Boolean) : ColumnInfo<Pa
 
 class TypeColumn : ColumnInfo<ParameterDataHolder, String>("Type") {
     override fun valueOf(item: ParameterDataHolder): String =
-        item.parameter.type?.toString() ?: "_"
+        item.parameter.typeText ?: "_"
 }
 /*
 class MutabilityColumn : ColumnInfo<ParameterDataHolder, Boolean>("Mutable") {
