@@ -506,7 +506,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
     private fun replaceOldStatementsWithCallExpr(config: RsExtractFunctionConfig, psiFactory: RsPsiFactory) {
         val stmt = StringBuilder()
         if (config.returnValue?.exprText != null) {
-            stmt.append("let ${config.returnValue.exprText} = ")
+            stmt.append("let mut ${config.returnValue.exprText} = ")
         }
         val firstParameter = config.parameters.firstOrNull()
         stmt.append(if (firstParameter != null && firstParameter.isSelf) {
