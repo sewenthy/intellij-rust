@@ -24,8 +24,7 @@ private var MOCK: ExtractFunctionUi? = null
 fun extractFunctionDialog(
     project: Project,
     config: RsExtractFunctionConfig,
-    callback: () -> Unit
-
+    callback: (Boolean) -> Unit,
 ) {
     val extractFunctionUi = if (isUnitTestMode) {
         MOCK ?: error("You should set mock ui via `withMockExtractFunctionUi`")
@@ -46,7 +45,7 @@ fun withMockExtractFunctionUi(mockUi: ExtractFunctionUi, action: () -> Unit) {
 }
 
 interface ExtractFunctionUi {
-    fun extract(config: RsExtractFunctionConfig, callback: () -> Unit)
+    fun extract(config: RsExtractFunctionConfig, callback: (Boolean) -> Unit)
 }
 
 fun noLifetimeFixMode(
@@ -109,12 +108,13 @@ fun cargoMode (
 
 
 fun extractionFailed (
-    project: Project
+    project: Project,
+    callback: () -> Unit
 ) {
     if (!isUnitTestMode) {
         val panel = panel {
             row(null) {
-                label("Extraction has failed. Check log.")
+                label("Extraction has failed. Check log. Would you like to revert the extraction? Press \"OK\" to revert--otherwise, cancel.")
             }
         }
         val dialog = dialog(
@@ -127,6 +127,7 @@ fun extractionFailed (
             errorText = null,
             modality = DialogWrapper.IdeModalityType.IDE
         ) {
+            callback()
             emptyList()
         }
         dialog.show()
@@ -138,7 +139,7 @@ private class DialogExtractFunctionUi(
     private val project: Project
 ) : ExtractFunctionUi {
 
-    override fun extract(config: RsExtractFunctionConfig, callback: () -> Unit) {
+    override fun extract(config: RsExtractFunctionConfig, callback: (Boolean) -> Unit) {
         val functionNameField = NameSuggestionsField(emptyArray(), project, RsFileType)
         functionNameField.minimumSize = JBUI.size(300, 30)
 
@@ -156,6 +157,18 @@ private class DialogExtractFunctionUi(
             signatureComponent.setSignature(config.signature)
         }
 
+        val extractOrTestMode = ComboBox<String>()
+        with(extractOrTestMode) {
+            addItem("Dump")
+            addItem("Extract")
+        }
+        extractOrTestMode.selectedItem = "Dump"
+        var dump = true
+
+        extractOrTestMode.addActionListener {
+            dump = extractOrTestMode.selectedItem == "Dump"
+        }
+
         val parameterPanel = ExtractFunctionParameterTablePanel(::isValidRustVariableIdentifier, config) {
             signatureComponent.setSignature(config.signature)
         }
@@ -165,6 +178,7 @@ private class DialogExtractFunctionUi(
             row("Visibility:") { cell(visibilityBox) }
             row("Parameters:") { fullWidthCell(parameterPanel) }
             row("Signature:") { fullWidthCell(signatureComponent) }
+            row("Mode:") { cell(extractOrTestMode) }
         }
 
         val extractDialog = dialog(
@@ -179,7 +193,7 @@ private class DialogExtractFunctionUi(
             modality = DialogWrapper.IdeModalityType.IDE
         ) {
             updateConfig(config, functionNameField, visibilityBox)
-            callback()
+            callback(dump)
             emptyList()
         }
 

@@ -52,13 +52,13 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         val end = editor?.selectionModel?.selectionEnd
         if (start === null || end === null) return
         val config = RsExtractFunctionConfig.create(file, start, end) ?: return
-
         extractFunctionDialog(project, config) {
-            extractFunction(project, file, config)
+            dump: Boolean ->
+            extractFunction(project, file, config, dump)
         }
     }
 
-    private fun extractFunction(project: Project, file: PsiFile, config: RsExtractFunctionConfig) {
+    private fun extractFunction(project: Project, file: PsiFile, config: RsExtractFunctionConfig, dump: Boolean) {
         project.runWriteCommandAction(
             RefactoringBundle.message("extract.method.title"),
             file
@@ -70,23 +70,23 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             renameFunctionParameters(extractedFunction, parameters.map { it.name })
             val types = (parameters.map { it.type } + config.returnValue?.type).filterNotNull()
             importTypeReferencesFromTys(extractedFunction, types)
-            if (dumpMethodCallTypes(extractedFunction)) {
-                LOG.info("dumped call types completed successfully")
-                if (nonLocalController(config, file)){
-                    LOG.info("controller completed successfully")
-                    if (borrow(config, file)) {
-                        LOG.info("borrow completed successfully")
-                        if (repairLifetime(config, file, project, psiFactory)){
-                            LOG.info("repairer completed successfully")
-                        }
-                    } else {
-                        extractionFailed(project)
-                    }
-                } else {
-                    extractionFailed(project)
+            if (dump) {
+                if (dumpMethodCallTypes(project, extractedFunction, file, dump)) {
+                    LOG.info("dumped call types completed successfully")
                 }
             } else {
-                extractionFailed(project)
+                if (dumpMethodCallTypes(project, extractedFunction, file, dump)) {
+                    LOG.info("dumped call types completed successfully")
+                    if (nonLocalController(project, config, file)){
+                        LOG.info("controller completed successfully")
+                        if (borrow(project, config, file)) {
+                            LOG.info("borrow completed successfully")
+                            if (repairLifetime(config, file, project, psiFactory)){
+                                LOG.info("repairer completed successfully")
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -135,8 +135,24 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
         proc2.waitFor(5, TimeUnit.MINUTES)
     }
 
-    private fun dumpMethodCallTypes(extractFn: RsFunction) : Boolean {
-        val dumpFileName = "/tmp/method_call_mutability.txt"
+    private fun dumpMethodCallTypes(project: Project, extractFn: RsFunction, file: PsiFile, dump: Boolean) : Boolean {
+        val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
+        val fileName = file.name
+        val filePath = "$fileParent/$fileName"
+        LOG.info("file path: $filePath")
+
+        var bak = "/tmp/${fileName}-ij-extract.bk"
+        if (dump) {
+            bak = "${filePath}_ORIGINAL"
+        }
+
+        execAndGetVal(arrayOf("cp", filePath, bak))
+
+        var dumpFileName = "/tmp/method_call_mutability.txt"
+        if (dump) {
+            var dumpFileName = "${filePath}_MUTABLE_METHOD_CALLS"
+        }
+
         val dumpFile = File(dumpFileName)
         dumpFile.writeText("")
         val begin = System.currentTimeMillis()
@@ -175,12 +191,17 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             val end = System.currentTimeMillis()
             LOG.info("dump method call elapsed time in milliseconds failure: ${end?.minus(begin)}")
             LOG.error("dump method call failed: $e")
+            if (!dump) {
+                extractionFailed(project) {
+                    failRepair(bak, filePath)
+                }
+            }
             return false
         }
         return true
     }
 
-    private fun nonLocalController(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
+    private fun nonLocalController(project: Project, config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
@@ -217,13 +238,15 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (!success) {
                 LOG.info("bad exit val restoring file")
                 LOG.info("nclf elapsed time in milliseconds failure: ${end?.minus(begin)}")
-                failRepair(bak, filePath)
+                extractionFailed(project) {
+                    failRepair(bak, filePath)
+                }
             }
             return success
         }
     }
 
-    private fun borrow(config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
+    private fun borrow(project: Project, config: RsExtractFunctionConfig, file: PsiFile) : Boolean {
         val name = config.name
         val parentFn = config.function
         val fileParent = file.getContainingDirectory().getVirtualFile().getPath()
@@ -256,7 +279,9 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             if (!success) {
                 LOG.info("bad exit val restoring file")
                 LOG.info("borrow elapsed time in milliseconds failure: ${end?.minus(begin)}")
-                failRepair(bak, filePath)
+                extractionFailed(project) {
+                    failRepair(bak, filePath)
+                }
             }
             return success
         }
