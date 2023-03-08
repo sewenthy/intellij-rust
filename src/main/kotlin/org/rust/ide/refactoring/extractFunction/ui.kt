@@ -162,7 +162,7 @@ private class DialogExtractFunctionUi(
             addItem("Dump")
             addItem("Extract")
         }
-        extractOrTestMode.selectedItem = "Dump"
+        extractOrTestMode.selectedItem = "Extract"
         var dump = true
 
         extractOrTestMode.addActionListener {
@@ -193,6 +193,7 @@ private class DialogExtractFunctionUi(
             modality = DialogWrapper.IdeModalityType.IDE
         ) {
             updateConfig(config, functionNameField, visibilityBox)
+            config.name = "${config.name}____EXTRACT_THIS"
             callback(dump)
             emptyList()
         }

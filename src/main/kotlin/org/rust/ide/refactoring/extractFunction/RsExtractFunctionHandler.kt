@@ -150,7 +150,7 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         var dumpFileName = "/tmp/method_call_mutability.txt"
         if (dump) {
-            var dumpFileName = "${filePath}_MUTABLE_METHOD_CALLS"
+            dumpFileName = "${filePath}_MUTABLE_METHOD_CALLS"
         }
 
         val dumpFile = File(dumpFileName)
@@ -315,6 +315,11 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
             }
         }
         fileAfterBorrow.acceptChildren(initVisitor)
+
+        if (parentFn == null || newFn == null) {
+            LOG.info("rustc repair failure--did not run cannot find caller and callee fn")
+            return false
+        }
 
         val fnTxt = "#[allow(dead_code)]\n${parentFn!!.text}\n${newFn!!.text}"
         val fileName = "/tmp/pre_repair_extract.rs"
