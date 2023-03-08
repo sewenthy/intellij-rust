@@ -440,15 +440,16 @@ class RsExtractFunctionHandler : RefactoringActionHandler {
 
         var cargoSuccess = false
 
-        if (repairLifetimeUsingRustc(config, file, psiFactory)) {
-            LOG.info("lifetime repair using rustc succeeded")
-            LOG.info("running cargo anyways for testing timing")
-            repairLifetimeUsingCargo(config, file, project)
-        } else {
-            cargoMode(project) {
-                cargoSuccess = repairLifetimeUsingCargo(config, file, project)
-            }
-        }
+        // if (repairLifetimeUsingRustc(config, file, psiFactory)) {
+        //     LOG.info("lifetime repair using rustc succeeded")
+        //     LOG.info("running cargo anyways for testing timing")
+        //     repairLifetimeUsingCargo(config, file, project)
+        // } else {
+        //     cargoMode(project) {
+        //         cargoSuccess = repairLifetimeUsingCargo(config, file, project)
+        //     }
+        // }
+        cargoSuccess = repairLifetimeUsingCargo(config, file, project)
         return cargoSuccess
     }
 
