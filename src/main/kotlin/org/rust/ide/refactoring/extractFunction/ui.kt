@@ -163,7 +163,7 @@ private class DialogExtractFunctionUi(
             addItem("Extract")
         }
         extractOrTestMode.selectedItem = "Extract"
-        var dump = true
+        var dump = false
 
         extractOrTestMode.addActionListener {
             dump = extractOrTestMode.selectedItem == "Dump"
